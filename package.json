@@ -1,0 +1,61 @@
+{
+  "name": "n8n-nodes-minimemory",
+  "version": "0.1.0",
+  "description": "n8n community node for embedded vector database - perform similarity search directly within n8n without external servers",
+  "author": {
+    "name": "Mauricio Perera",
+    "email": "mauricio.perera@gmail.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MauricioPerera/n8n-nodes-minimemory.git"
+  },
+  "bugs": {
+    "url": "https://github.com/MauricioPerera/n8n-nodes-minimemory/issues"
+  },
+  "homepage": "https://github.com/MauricioPerera/n8n-nodes-minimemory#readme",
+  "keywords": [
+    "n8n",
+    "n8n-community-node-package",
+    "vector",
+    "database",
+    "embedding",
+    "similarity",
+    "search"
+  ],
+  "license": "MIT",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc && shx cp nodes/Minimemory/*.svg dist/nodes/Minimemory/",
+    "dev": "tsc --watch",
+    "lint": "eslint nodes credentials --ext .ts",
+    "lintfix": "eslint nodes credentials --ext .ts --fix",
+    "prepublishOnly": "npm run build && npm run lint",
+    "release": "npm run build && npm publish --access public"
+  },
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "nodes": [
+      "dist/nodes/Minimemory/Minimemory.node.js"
+    ],
+    "credentials": [
+      "dist/credentials/MinimemoryConfig.credentials.js"
+    ]
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^8.57.0",
+    "eslint-plugin-n8n-nodes-base": "^1.16.0",
+    "n8n-workflow": "^1.0.0",
+    "shx": "^0.3.4",
+    "typescript": "^5.3.0"
+  },
+  "peerDependencies": {
+    "n8n-workflow": "*"
+  }
+}
