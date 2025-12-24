@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-minimemory",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "description": "n8n community node for embedded vector database - perform similarity search directly within n8n without external servers",
   "author": {
     "name": "Mauricio Perera",
@@ -28,8 +28,8 @@
   "scripts": {
     "build": "tsc && shx cp nodes/Minimemory/*.svg dist/nodes/Minimemory/",
     "dev": "tsc --watch",
-    "lint": "eslint nodes credentials --ext .ts",
-    "lintfix": "eslint nodes credentials --ext .ts --fix",
+    "lint": "eslint nodes --ext .ts",
+    "lintfix": "eslint nodes --ext .ts --fix",
     "prepublishOnly": "npm run build && npm run lint",
     "release": "npm run build && npm publish --access public"
   },
@@ -37,9 +37,6 @@
     "n8nNodesApiVersion": 1,
     "nodes": [
       "dist/nodes/Minimemory/Minimemory.node.js"
-    ],
-    "credentials": [
-      "dist/credentials/MinimemoryConfig.credentials.js"
     ]
   },
   "files": [

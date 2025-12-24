@@ -12,8 +12,10 @@ Perform vector similarity search directly within n8n without any external server
 
 - **No server required** - Everything runs locally within n8n
 - **Similarity search** - Find the k most similar vectors
+- **Hybrid search** - Combine vector + keyword (BM25) search
 - **Multiple metrics** - Cosine, Euclidean, Dot Product
 - **Metadata support** - Associate additional information with each vector
+- **Metadata filtering** - MongoDB-style query operators
 - **Persistence** - Save/load from JSON files
 - **Bulk insert** - Insert multiple vectors from previous nodes
 
@@ -73,23 +75,133 @@ Bulk insert vectors from input items.
 ```
 
 ### Search
-Search for the k nearest neighbors.
+Search for the k nearest neighbors using vector, keyword, or hybrid search.
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| Query Vector | Query vector | |
+| Search Mode | `vector`, `keyword`, or `hybrid` | `vector` |
+| Query Vector | Vector for similarity search | (required for vector/hybrid) |
+| Keywords | Text for BM25 keyword search | (required for keyword/hybrid) |
+| Text Fields | Metadata fields to search | `content,text,title,description` |
 | Number of Results (K) | Number of results | `10` |
 | Include Vectors | Include vectors in result | `false` |
 | Minimum Similarity | Filter by minimum similarity | `0` |
+| Use Metadata Filter | Enable metadata filtering | `false` |
+| Metadata Filter | JSON filter (see below) | `{}` |
+| Hybrid Alpha | Vector(1) vs Keyword(0) balance | `0.5` |
+| Fusion Method | `rrf` or `weighted` | `rrf` |
+| BM25 K1 | Term saturation parameter | `1.2` |
+| BM25 B | Length normalization | `0.75` |
 
 **Output:**
 ```json
 {
   "success": true,
+  "searchMode": "hybrid",
+  "filterApplied": true,
   "results": [
-    {"id": "doc1", "distance": 0.1, "similarity": 0.9, "metadata": {...}},
-    {"id": "doc2", "distance": 0.2, "similarity": 0.8, "metadata": {...}}
+    {"id": "doc1", "score": 0.032, "vectorSimilarity": 0.9, "keywordScore": 12.4, "metadata": {...}},
+    {"id": "doc2", "score": 0.028, "vectorSimilarity": 0.8, "keywordScore": 8.2, "metadata": {...}}
   ]
+}
+```
+
+## Metadata Filtering (New in v0.2.0)
+
+Filter search results by metadata fields using MongoDB-style operators.
+
+### Basic Filters
+
+```json
+// Exact match
+{"category": "tech"}
+
+// Multiple conditions (implicit AND)
+{"category": "tech", "author": "John"}
+```
+
+### Comparison Operators
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `$eq` | Equal (implicit) | `{"status": "active"}` |
+| `$ne` | Not equal | `{"status": {"$ne": "deleted"}}` |
+| `$gt` | Greater than | `{"score": {"$gt": 0.5}}` |
+| `$gte` | Greater or equal | `{"price": {"$gte": 100}}` |
+| `$lt` | Less than | `{"age": {"$lt": 30}}` |
+| `$lte` | Less or equal | `{"count": {"$lte": 10}}` |
+
+### Array Operators
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `$in` | In array | `{"category": {"$in": ["tech", "science"]}}` |
+| `$nin` | Not in array | `{"type": {"$nin": ["spam", "ad"]}}` |
+
+### String Operators
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `$contains` | Contains (case-insensitive) | `{"title": {"$contains": "AI"}}` |
+| `$startsWith` | Starts with | `{"name": {"$startsWith": "Dr."}}` |
+| `$endsWith` | Ends with | `{"file": {"$endsWith": ".pdf"}}` |
+
+### Other Operators
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `$exists` | Field exists | `{"email": {"$exists": true}}` |
+
+### Logical Operators
+
+```json
+// AND - all conditions must match
+{
+  "$and": [
+    {"category": "tech"},
+    {"score": {"$gt": 0.8}}
+  ]
+}
+
+// OR - any condition matches
+{
+  "$or": [
+    {"type": "article"},
+    {"type": "blog"}
+  ]
+}
+```
+
+### Nested Fields
+
+Access nested object fields using dot notation:
+
+```json
+{"user.profile.country": "US"}
+```
+
+### Filter Examples
+
+**Find tech articles with high score:**
+```json
+{
+  "$and": [
+    {"category": "tech"},
+    {"score": {"$gte": 0.8}}
+  ]
+}
+```
+
+**Find documents from specific authors:**
+```json
+{"author": {"$in": ["Alice", "Bob", "Charlie"]}}
+```
+
+**Find recent documents with keyword:**
+```json
+{
+  "timestamp": {"$gt": "2024-01-01"},
+  "title": {"$contains": "machine learning"}
 }
 ```
 
@@ -197,7 +309,7 @@ The inserted/searched vector has a different number of dimensions than the DB.
 ## Support
 
 For issues and feature requests, please visit:
-https://github.com/yourusername/n8n-nodes-minimemory/issues
+https://github.com/MauricioPerera/n8n-nodes-minimemory/issues
 
 ## License
 

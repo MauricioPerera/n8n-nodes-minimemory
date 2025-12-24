@@ -10,11 +10,16 @@ import {
 import {
 	createDB,
 	getDB,
-	loadDB,
+	importDB,
 	listDBs,
 	deleteDB,
 	type DistanceMetric,
 	type IndexType,
+	type MetadataFilter,
+	type SearchMode,
+	type FusionMethod,
+	type HybridSearchResult,
+	type SerializedDB,
 } from './VectorDB';
 
 export class Minimemory implements INodeType {
@@ -70,6 +75,12 @@ export class Minimemory implements INodeType {
 						action: 'Delete a vector',
 					},
 					{
+						name: 'Export Database',
+						value: 'export',
+						description: 'Export database as JSON (use with Write Binary File node to save)',
+						action: 'Export database to JSON',
+					},
+					{
 						name: 'Get',
 						value: 'get',
 						description: 'Get a vector by its ID',
@@ -80,6 +91,12 @@ export class Minimemory implements INodeType {
 						value: 'info',
 						description: 'Get database information and statistics',
 						action: 'Get database info',
+					},
+					{
+						name: 'Import Database',
+						value: 'import',
+						description: 'Import database from JSON data',
+						action: 'Import database from JSON',
 					},
 					{
 						name: 'Insert Many',
@@ -100,16 +117,16 @@ export class Minimemory implements INodeType {
 						action: 'List all databases',
 					},
 					{
-						name: 'Load From File',
-						value: 'load',
-						description: 'Load database from a JSON file',
-						action: 'Load database from file',
+						name: 'Persist to Workflow',
+						value: 'persist',
+						description: 'Save database to workflow static data (survives n8n restarts)',
+						action: 'Persist database to workflow',
 					},
 					{
-						name: 'Save to File',
-						value: 'save',
-						description: 'Save database to a JSON file',
-						action: 'Save database to file',
+						name: 'Restore From Workflow',
+						value: 'restore',
+						description: 'Load database from workflow static data',
+						action: 'Restore database from workflow',
 					},
 					{
 						name: 'Search',
@@ -286,6 +303,35 @@ export class Minimemory implements INodeType {
 
 			// === SEARCH operation fields ===
 			{
+				displayName: 'Search Mode',
+				name: 'searchMode',
+				type: 'options',
+				options: [
+					{
+						name: 'Vector Only',
+						value: 'vector',
+						description: 'Traditional vector similarity search',
+					},
+					{
+						name: 'Keyword Only (BM25)',
+						value: 'keyword',
+						description: 'Full-text keyword search using BM25 algorithm',
+					},
+					{
+						name: 'Hybrid (Vector + Keyword)',
+						value: 'hybrid',
+						description: 'Combine vector and keyword search for best results',
+					},
+				],
+				default: 'vector',
+				description: 'How to search the database',
+				displayOptions: {
+					show: {
+						operation: ['search'],
+					},
+				},
+			},
+			{
 				displayName: 'Query Vector',
 				name: 'queryVector',
 				type: 'json',
@@ -295,6 +341,34 @@ export class Minimemory implements INodeType {
 				displayOptions: {
 					show: {
 						operation: ['search'],
+						searchMode: ['vector', 'hybrid'],
+					},
+				},
+			},
+			{
+				displayName: 'Keywords',
+				name: 'keywords',
+				type: 'string',
+				default: '',
+				required: true,
+				description: 'Search keywords or phrase for BM25 full-text search',
+				displayOptions: {
+					show: {
+						operation: ['search'],
+						searchMode: ['keyword', 'hybrid'],
+					},
+				},
+			},
+			{
+				displayName: 'Text Fields',
+				name: 'textFields',
+				type: 'string',
+				default: 'content,text,title,description',
+				description: 'Comma-separated metadata field names to search for keywords',
+				displayOptions: {
+					show: {
+						operation: ['search'],
+						searchMode: ['keyword', 'hybrid'],
 					},
 				},
 			},
@@ -334,19 +408,122 @@ export class Minimemory implements INodeType {
 					},
 				},
 			},
-
-			// === SAVE/LOAD operation fields ===
 			{
-				displayName: 'File Path',
-				name: 'filePath',
-				type: 'string',
-				default: '',
-				required: true,
-				description: 'Full path to the database file (JSON format)',
-				placeholder: '/data/vectors/my_database.json',
+				displayName: 'Use Metadata Filter',
+				name: 'useFilter',
+				type: 'boolean',
+				default: false,
+				description: 'Whether to filter results by metadata fields',
 				displayOptions: {
 					show: {
-						operation: ['save', 'load'],
+						operation: ['search'],
+					},
+				},
+			},
+			{
+				displayName: 'Metadata Filter',
+				name: 'metadataFilter',
+				type: 'json',
+				default: '{}',
+				description: 'JSON filter for metadata. Examples: {"userId": "123"} for exact match, {"score": {"$gt": 0.5}} for greater than, {"tags": {"$in": ["a","b"]}} for array contains. Operators: $eq, $ne, $gt, $gte, $lt, $lte, $in, $nin, $exists, $contains, $startsWith, $endsWith. Use $and/$or for logical operators.',
+				displayOptions: {
+					show: {
+						operation: ['search'],
+						useFilter: [true],
+					},
+				},
+			},
+			{
+				displayName: 'Hybrid Alpha',
+				name: 'hybridAlpha',
+				type: 'number',
+				typeOptions: {
+					minValue: 0,
+					maxValue: 1,
+					numberStepSize: 0.1,
+				},
+				default: 0.5,
+				description: 'Balance between vector (1.0) and keyword (0.0) search. 0.5 = equal weight.',
+				displayOptions: {
+					show: {
+						operation: ['search'],
+						searchMode: ['hybrid'],
+					},
+				},
+			},
+			{
+				displayName: 'Fusion Method',
+				name: 'fusionMethod',
+				type: 'options',
+				options: [
+					{
+						name: 'Reciprocal Rank Fusion (Recommended)',
+						value: 'rrf',
+						description: 'Combines rankings without needing score normalization',
+					},
+					{
+						name: 'Weighted Score Combination',
+						value: 'weighted',
+						description: 'Directly combines normalized scores using alpha',
+					},
+				],
+				default: 'rrf',
+				description: 'How to combine vector and keyword results',
+				displayOptions: {
+					show: {
+						operation: ['search'],
+						searchMode: ['hybrid'],
+					},
+				},
+			},
+			{
+				displayName: 'BM25 K1 (Term Saturation)',
+				name: 'bm25K1',
+				type: 'number',
+				typeOptions: {
+					minValue: 0,
+					maxValue: 3,
+					numberStepSize: 0.1,
+				},
+				default: 1.2,
+				description: 'BM25 term frequency saturation. Higher = more weight to term frequency. Typical: 1.2-2.0.',
+				displayOptions: {
+					show: {
+						operation: ['search'],
+						searchMode: ['keyword', 'hybrid'],
+					},
+				},
+			},
+			{
+				displayName: 'BM25 B (Length Normalization)',
+				name: 'bm25B',
+				type: 'number',
+				typeOptions: {
+					minValue: 0,
+					maxValue: 1,
+					numberStepSize: 0.05,
+				},
+				default: 0.75,
+				description: 'BM25 document length normalization. 0 = no normalization, 1 = full normalization.',
+				displayOptions: {
+					show: {
+						operation: ['search'],
+						searchMode: ['keyword', 'hybrid'],
+					},
+				},
+			},
+
+			// === IMPORT operation field ===
+			{
+				displayName: 'Database Data',
+				name: 'databaseData',
+				type: 'json',
+				default: '{}',
+				required: true,
+				description: 'JSON data from a previously exported database. Use expression like {{ $JSON.data }} to get from previous node.',
+				displayOptions: {
+					show: {
+						operation: ['import'],
 					},
 				},
 			},
@@ -442,32 +619,95 @@ export class Minimemory implements INodeType {
 
 					case 'search': {
 						const db = getDB(databaseName);
-						const queryJson = this.getNodeParameter('queryVector', i);
+						const searchMode = this.getNodeParameter('searchMode', i) as SearchMode;
 						const topK = this.getNodeParameter('topK', i) as number;
 						const includeVectors = this.getNodeParameter('includeVectors', i) as boolean;
 						const minSimilarity = this.getNodeParameter('minSimilarity', i) as number;
+						const useFilter = this.getNodeParameter('useFilter', i) as boolean;
 
-						const queryVector = typeof queryJson === 'string'
-							? JSON.parse(queryJson)
-							: queryJson;
+						// Parse metadata filter if enabled
+						let filter: MetadataFilter | undefined;
+						if (useFilter) {
+							const filterJson = this.getNodeParameter('metadataFilter', i);
+							filter = typeof filterJson === 'string'
+								? JSON.parse(filterJson)
+								: filterJson as MetadataFilter;
 
-						let results = db.search(queryVector, topK);
-
-						// Filter by minimum similarity if specified
-						if (minSimilarity > 0) {
-							results = results.filter(r => r.similarity >= minSimilarity);
+							if (!filter || Object.keys(filter).length === 0) {
+								filter = undefined;
+							}
 						}
 
-						// Optionally include vectors
-						const formattedResults = results.map(r => {
+						// Get search mode specific parameters
+						let queryVector: number[] | undefined;
+						if (searchMode === 'vector' || searchMode === 'hybrid') {
+							const queryJson = this.getNodeParameter('queryVector', i);
+							queryVector = typeof queryJson === 'string'
+								? JSON.parse(queryJson)
+								: queryJson;
+						}
+
+						let keywords: string | undefined;
+						let textFields: string[] | undefined;
+						let bm25K1: number | undefined;
+						let bm25B: number | undefined;
+
+						if (searchMode === 'keyword' || searchMode === 'hybrid') {
+							keywords = this.getNodeParameter('keywords', i) as string;
+							const textFieldsStr = this.getNodeParameter('textFields', i) as string;
+							textFields = textFieldsStr.split(',').map(f => f.trim()).filter(f => f.length > 0);
+							bm25K1 = this.getNodeParameter('bm25K1', i) as number;
+							bm25B = this.getNodeParameter('bm25B', i) as number;
+						}
+
+						let alpha: number | undefined;
+						let fusionMethod: FusionMethod | undefined;
+
+						if (searchMode === 'hybrid') {
+							alpha = this.getNodeParameter('hybridAlpha', i) as number;
+							fusionMethod = this.getNodeParameter('fusionMethod', i) as FusionMethod;
+						}
+
+						// Perform search based on mode
+						const searchResults = db.hybridSearch({
+							mode: searchMode,
+							k: topK,
+							queryVector,
+							keywords,
+							textFields,
+							filter,
+							minSimilarity: minSimilarity > 0 ? minSimilarity : undefined,
+							alpha,
+							fusionMethod,
+							bm25K1,
+							bm25B,
+						});
+
+						// Format results
+						const formattedResults = searchResults.map((r: HybridSearchResult) => {
 							const item: IDataObject = {
 								id: r.id,
-								distance: r.distance,
-								similarity: r.similarity,
+								score: r.score,
 							};
+
+							// Add mode-specific scores
+							if (r.vectorSimilarity !== undefined) {
+								item.vectorSimilarity = r.vectorSimilarity;
+							}
+							if (r.keywordScore !== undefined) {
+								item.keywordScore = r.keywordScore;
+							}
+							if (r.vectorRank !== undefined) {
+								item.vectorRank = r.vectorRank;
+							}
+							if (r.keywordRank !== undefined) {
+								item.keywordRank = r.keywordRank;
+							}
+
 							if (r.metadata) {
 								item.metadata = r.metadata as IDataObject;
 							}
+
 							if (includeVectors) {
 								const stored = db.get(r.id);
 								if (stored) {
@@ -479,8 +719,9 @@ export class Minimemory implements INodeType {
 
 						result = {
 							success: true,
-							query: 'vector',
+							searchMode,
 							k: topK,
+							filterApplied: !!filter,
 							resultsCount: formattedResults.length,
 							results: formattedResults,
 						};
@@ -527,34 +768,83 @@ export class Minimemory implements INodeType {
 						break;
 					}
 
-					case 'save': {
+					case 'export': {
 						const db = getDB(databaseName);
-						const filePath = this.getNodeParameter('filePath', i) as string;
+						const exportedData = db.export();
 
-						db.save(filePath);
 						result = {
 							success: true,
-							message: `Database saved to ${filePath}`,
-							path: filePath,
+							message: `Database "${databaseName}" exported successfully`,
+							name: databaseName,
+							totalVectors: db.length,
+							dimensions: db.dimensions,
+							data: exportedData,
+						};
+						break;
+					}
+
+					case 'import': {
+						const dataJson = this.getNodeParameter('databaseData', i);
+						const data: SerializedDB = typeof dataJson === 'string'
+							? JSON.parse(dataJson)
+							: dataJson as SerializedDB;
+
+						const db = importDB(databaseName, data);
+						result = {
+							success: true,
+							message: `Database "${databaseName}" imported successfully`,
+							name: databaseName,
+							totalVectors: db.length,
+							dimensions: db.dimensions,
+							distance: db.distance,
+						};
+						break;
+					}
+
+					case 'persist': {
+						const db = getDB(databaseName);
+						const staticData = this.getWorkflowStaticData('global');
+						const exportedData = db.export();
+
+						// Store in static data with a key based on database name
+						const storageKey = `minimemory_${databaseName}`;
+						staticData[storageKey] = exportedData;
+
+						result = {
+							success: true,
+							message: `Database "${databaseName}" persisted to workflow static data`,
+							name: databaseName,
+							storageKey,
 							totalVectors: db.length,
 							dimensions: db.dimensions,
 						};
 						break;
 					}
 
-					case 'load': {
-						const filePath = this.getNodeParameter('filePath', i) as string;
+					case 'restore': {
+						const staticData = this.getWorkflowStaticData('global');
+						const storageKey = `minimemory_${databaseName}`;
+						const storedData = staticData[storageKey] as SerializedDB | undefined;
 
-						const db = loadDB(databaseName, filePath);
-						result = {
-							success: true,
-							message: `Database loaded from ${filePath}`,
-							name: databaseName,
-							path: filePath,
-							totalVectors: db.length,
-							dimensions: db.dimensions,
-							distance: db.distance,
-						};
+						if (!storedData) {
+							result = {
+								success: false,
+								message: `No persisted data found for database "${databaseName}"`,
+								name: databaseName,
+								storageKey,
+							};
+						} else {
+							const db = importDB(databaseName, storedData);
+							result = {
+								success: true,
+								message: `Database "${databaseName}" restored from workflow static data`,
+								name: databaseName,
+								storageKey,
+								totalVectors: db.length,
+								dimensions: db.dimensions,
+								distance: db.distance,
+							};
+						}
 						break;
 					}
 
